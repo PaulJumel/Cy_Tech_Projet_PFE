@@ -73,22 +73,25 @@ def maximal_cliquematch_time_loss(adj_matrix):
 
 def maximal_clique_time_loss(adj_matrix):
     batch_size, n_nodes, _ = adj_matrix.size()
-    total_loss = torch.zeros(batch_size).to(adj_matrix.device)
     time_loss = torch.zeros(batch_size).to(adj_matrix.device)
+    
+    
     for i in range(batch_size):
-        # Utiliser le straight-through estimator
         matrice = (adj_matrix[i] > 0.5).float() + adj_matrix[i] - adj_matrix[i].detach()
-        # Convertir la matrice d'adjacence en un graphe NetworkX
         G = nx.from_numpy_array(matrice.detach().cpu().numpy())
         
         start_time = time.time()
-        # Trouver les cycles dans le graphe
-        maximal_cliques = nx.find_cliques(G)
+        maximal_cliques = list(nx.find_cliques(G))
         end_time = time.time()
-        # Calculer la perte basée sur les arêtes qui forment les cycles
         time_loss[i] = end_time - start_time
-    time_loss = -torch.sum(time_loss)
-    return time_loss
+    
+    
+    scale_factor = 100.0
+    time_loss = torch.log(time_loss + 1e-10)
+    final_loss = -scale_factor * torch.sum(time_loss)
+    
+    return final_loss
+
 
 def find_mirrors(G, v):
     N_v = set(G.neighbors(v))
@@ -104,26 +107,23 @@ def fold_node(G, v):
     neighbors = list(G.neighbors(v))
     anti_edges = [(u, w) for i, u in enumerate(neighbors) for w in neighbors[i+1:] if not G.has_edge(u, w)]
     
-    #Add a new node u_ij for each anti-edge u_i u_j in N(v)
     new_nodes = {}
     for u, w in anti_edges:
         new_node = f"{u}_{w}"
         G.add_node(new_node)
         new_nodes[(u, w)] = new_node
     
-    #Add edges between each u_ij and the nodes in N(u_i) ∪ N(u_j)
     for (u, w), new_node in new_nodes.items():
         neighbors_u_w = set(G.neighbors(u)).union(set(G.neighbors(w)))
         for neighbor in neighbors_u_w:
             G.add_edge(new_node, neighbor)
     
-    #Add one edge between each pair of new nodes
     new_node_list = list(new_nodes.values())
     for i in range(len(new_node_list)):
         for j in range(i + 1, len(new_node_list)):
             G.add_edge(new_node_list[i], new_node_list[j])
     
-    #Remove N[v]
+    
     G.remove_nodes_from(neighbors)
     G.remove_node(v)
     
@@ -134,7 +134,6 @@ def mis(G):
     if G.number_of_nodes() == 0:
         return 0, set()
     
-    #Connected components
     if nx.number_connected_components(G) > 1:
         total_mis = 0
         total_nodes = set()
@@ -146,7 +145,7 @@ def mis(G):
             total_nodes.update(subgraph_nodes)
         return total_mis, total_nodes
     
-    #Node domination
+    
     for v in G.nodes():
         for w in G.nodes():
             if v != w and set(G.neighbors(v)).union({v}).issubset(set(G.neighbors(w)).union({w})):
@@ -155,7 +154,7 @@ def mis(G):
                 H.remove_node(w)
                 return mis(H)
     
-    #Foldable node
+    
     for v in G.nodes():
         neighbors = list(G.neighbors(v))
         if len(neighbors) <= 4:
@@ -169,7 +168,7 @@ def mis(G):
                 sub_mis, sub_nodes = mis(H)
                 return 1 + sub_mis, sub_nodes.union({v})
     
-    #v is the node of maximum degree
+    
     v = max(G.nodes(), key=G.degree)
     mirrors = find_mirrors(G, v)
     H1 = G.copy()
@@ -187,48 +186,65 @@ def mis(G):
     else:
         return 1 + mis2, nodes2.union({v})
 def generate_erdos_renyi(n, p=0.5):
-    # Create empty adjacency matrix
+    
     adj_matrix = np.zeros((n, n))
     
-    # Fill upper triangle with random edges
+    
     for i in range(n):
         for j in range(i+1, n):
             if random.random() < p:
                 adj_matrix[i][j] = 1
-                adj_matrix[j][i] = 1  # Make it symmetric
+                adj_matrix[j][i] = 1
                 
     return adj_matrix
 
     
-def train(n_nodes=10,
-           n_graphs=256,
-           num_epochs=10_000,
-           batch_size=32,
-           fct=generate_erdos_renyi,
-           loss_algo=maximal_clique_time_loss):
+
+def train(n_nodes=10, n_graphs=256, num_epochs=10_000, batch_size=32, fct=generate_erdos_renyi, loss_algo=maximal_clique_time_loss):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
-    time_ratios = []
+    
+    batch_times = [] 
+    g_losses = []
+    d_losses = []
+    mean_times = []
+    var_times = []
     graph_dataset = [fct(n_nodes) for _ in range(n_graphs)]
     
     generator = Generator(n_nodes).to(device)
     discriminator = Discriminator(n_nodes).to(device)
     
-    g_optimizer = optim.Adam(generator.parameters(), lr=0.0001)
-    d_optimizer = optim.Adam(discriminator.parameters(), lr=0.0001)
+    g_optimizer = optim.Adam(generator.parameters(), lr=0.0001, weight_decay=1e-5)
+    d_optimizer = optim.Adam(discriminator.parameters(), lr=0.0001, weight_decay=1e-5)
 
     for epoch in range(num_epochs):
+        epoch_mean_times = []
+        epoch_var_times = []
         for i in range(0, n_graphs, batch_size):
             batch_graphs_np = np.array(graph_dataset[i:i+batch_size])
             real_graphs = torch.tensor(batch_graphs_np, dtype=torch.float32).to(device)
-
-            
             
             z = torch.randn(batch_size, n_nodes).to(device)
-            
             fake_adj = generator(z)
             
-
+           
+            times = []
+            graphs = []
+            for j in range(batch_size):
+                single_graph = fake_adj[j].unsqueeze(0)
+                time_value = loss_algo(single_graph)
+                times.append(float(time_value.item()))
+                graphs.append(fake_adj[j].cpu().detach().numpy())
+            
+            
+            sorted_pairs = sorted(zip(times, graphs), key=lambda x: x[0], reverse=True)
+            hardest_times, hardest_graphs = zip(*sorted_pairs[:batch_size//2])
+            
+            
+            replace_indices = sorted(range(i, min(i+batch_size, n_graphs)), key=lambda idx: times[idx-i])[:batch_size//2]
+            for idx, graph in zip(replace_indices, hardest_graphs):
+                graph_dataset[idx] = graph
+            
             d_optimizer.zero_grad()
             d_real = discriminator(real_graphs)
             d_fake = discriminator(fake_adj.detach())
@@ -238,31 +254,70 @@ def train(n_nodes=10,
             
             g_optimizer.zero_grad()
             g_fake = discriminator(fake_adj)
-            reference_time = loss_algo(real_graphs)
             time_algo = loss_algo(fake_adj)
-            time_ratios.append((time_algo/reference_time).cpu().detach().numpy())
-            g_loss = -torch.mean(torch.log(1-g_fake)) + 50*time_algo
+            batch_times.append(float(time_algo.item()))
+            
+            g_loss = -torch.mean(torch.log(1-g_fake)) + time_algo
             g_loss.backward()
             g_optimizer.step()
             
+            g_losses.append(g_loss.item())
+            d_losses.append(d_loss.item())
             
-        if epoch % 1 == 0:
-            print(f'''Epoch [{epoch}/{num_epochs}],
-                d_loss: {d_loss.item()},
-                g_loss: {g_loss.item()},
-                time_algo: {time_algo}''')
-            
-            torch.save(generator.state_dict(), 'generator_cycle2.pth')
-            torch.save(discriminator.state_dict(), 'discriminator_cycle.pth')
-    plt.figure(figsize=(10, 6))
-    plt.plot(time_ratios)
+            epoch_mean_times.append(np.mean(hardest_times))
+            epoch_var_times.append(np.var(hardest_times))
+        
+        
+        mean_times.append(np.mean(epoch_mean_times))
+        var_times.append(np.mean(epoch_var_times))
+        
+        if epoch % 100 == 0:
+            print(f'Epoch [{epoch}/{num_epochs}], d_loss: {d_loss.item()}, g_loss: {g_loss.item()}, Current batch time: {batch_times[-1]}, Hardest time: {hardest_times[0]}')
+            torch.save(generator.state_dict(), 'generator_hard.pth')
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(g_losses, label='Generator Loss')
+    plt.plot(d_losses, label='Discriminator Loss')
     plt.xlabel('Iteration')
-    plt.ylabel('Time Ratio (time_algo/reference_time)')
-    plt.title('Algorithm Time Ratio Evolution')
+    plt.ylabel('Loss')
+    plt.title('Generator and Discriminator Losses Over Time')
+    plt.legend()
     plt.grid(True)
     plt.show()
+"""
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(batch_times)
+    plt.xlabel('Batch Step')
+    plt.ylabel('Algorithm Time (seconds)')
+    plt.title('Algorithm Time Evolution per Batch')
+    plt.grid(True)
+    plt.show()
+
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(num_epochs), mean_times, label='temps moyen')
+    plt.xlabel('Epoch')
+    plt.ylabel('Mean Time (seconds)')
+    plt.title('Moyenne des graphes ajoutés en fonction du nombre d epochs')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(num_epochs), var_times, label='Variance')
+    plt.xlabel('Epoch')
+    plt.ylabel('Variance of Time (seconds^2)')
+    plt.title('Variance des graphes ajoutés en fonction du nombre d epochs')
+    plt.legend()
+    plt.grid(True)
+    plt.show()"""
+
+
 n_nodes = 10
-train(n_nodes=n_nodes, n_graphs=1024, num_epochs=350, batch_size=32, fct=generate_erdos_renyi)
+train(n_nodes=n_nodes, n_graphs=1024, num_epochs=300
+      , batch_size=32, fct=generate_erdos_renyi)
 
 def visualize_generated_graphs(generator, n_samples=5, n_nodes=10):
     generator.eval()
@@ -283,6 +338,6 @@ def visualize_generated_graphs(generator, n_samples=5, n_nodes=10):
 
 generator = Generator(n_nodes=n_nodes)
 
-generator.load_state_dict(torch.load('generator_cycle2.pth'))
+generator.load_state_dict(torch.load('generator_hard.pth'))
 
 visualize_generated_graphs(generator, n_samples=5, n_nodes=n_nodes)
