@@ -3,7 +3,7 @@
 Ce projet explore l'utilisation des GANs pour la génération de graphes complexes, avec une intégration d'un algorithme d'optimisation pour améliorer l'apprentissage du modèle.
 
 Structure du projet:
-1. generation_graphs_complexes
+1. generation_graphes_complexes
 2. trouver_des_cliques_maximum
 
 Ce README explique comment utiliser les scripts pour générer, entraîner et tester des graphes complexes via des GANs.
