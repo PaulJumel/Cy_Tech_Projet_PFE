@@ -22,7 +22,7 @@ Le projet est divisé en deux dossiers principaux :
 - generation_graphs_complexes : pour la génération des graphes.
 - trouver_des_cliques_maximum : pour l'algorithme d'optimisation des cliques maximaux.
 
-# Dossier "generation_graphs_complexes"
+# Dossier "generation_graphes_complexes"
 
 Ce dossier contient les scripts pour générer des graphes de différents types.
 
