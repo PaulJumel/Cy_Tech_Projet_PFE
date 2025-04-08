@@ -27,7 +27,7 @@ Le projet est divisé en deux dossiers principaux :
 Ce dossier contient les scripts pour générer des graphes de différents types.
 
 1.Pour créer un dataset de graphes, utilisez la commande suivante :
-- python .\create_adjacency_matrices.py --graph_type <type_graphe>
+- python ./create_adjacency_matrices.py --graph_type <type_graphe>
 
 Types de graphes :
 - 1 -> Graphe planaire
@@ -39,7 +39,7 @@ Types de graphes :
 2.Entraînement du modèle GAN
 
 Une fois le dataset de graphes généré, vous pouvez entraîner le modèle GAN avec la commande suivante :
-- python .\training.py --type_graphs <type_graphe>
+- python ./training.py --type_graphs <type_graphe>
 
 # Dossier "trouver_des_cliques_maximum"
 Ce dossier contient l'algorithme d'optimisation utilisé pour détecter les cliques maximaux dans les graphes générés.
