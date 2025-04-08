@@ -41,5 +41,10 @@ Types de graphes :
 Une fois le dataset de graphes généré, vous pouvez entraîner le modèle GAN avec la commande suivante :
 - python ./training.py --type_graphs <type_graphe>
 
+3.Teste des modèles
+
+Vous pouvez générer des graphes via les poids des modèles enregistrés en utilisant la commande suivante : 
+- python ./testing.py --type_graphs <type_graphe>
+
 # Dossier "trouver_des_cliques_maximum"
 Ce dossier contient l'algorithme d'optimisation utilisé pour détecter les cliques maximaux dans les graphes générés.
